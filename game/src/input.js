@@ -1,53 +1,78 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard and mouse input controller with edge-triggered press consumption and world-space aim tracking.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export function createInput(canvas, onFirstKey) {
+  const down = new Set();
+  const pressed = new Set();
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+  const state = {
+    mouseDown: false,
+    mouseX: 640,
+    mouseY: 400,
+    worldMouseX: null,
+    worldMouseY: null,
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
-
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
-
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    isDown(code) {
+      return down.has(code);
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+
+    consumePressed(code) {
+      if (pressed.has(code)) {
+        pressed.delete(code);
+        return true;
+      }
+      return false;
+    },
+
+    clearFramePressed() {
+      pressed.clear();
+    },
+
+    updateWorldMouse(camera) {
+      this.worldMouseX = camera.x + (this.mouseX - camera.viewportW * 0.5);
+      this.worldMouseY = camera.y + (this.mouseY - camera.viewportH * 0.5);
     },
   };
+
+  window.addEventListener('keydown', (e) => {
+    if (!down.has(e.code)) {
+      pressed.add(e.code);
+    }
+    down.add(e.code);
+    if (onFirstKey) onFirstKey(e.code);
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    down.delete(e.code);
+  });
+
+  window.addEventListener('blur', () => {
+    down.clear();
+    pressed.clear();
+    state.mouseDown = false;
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      state.mouseX = ((e.clientX - rect.left) / rect.width) * canvas.width;
+      state.mouseY = ((e.clientY - rect.top) / rect.height) * canvas.height;
+    }
+  });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) {
+      state.mouseDown = true;
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) {
+      state.mouseDown = false;
+    }
+  });
+
+  return state;
 }
